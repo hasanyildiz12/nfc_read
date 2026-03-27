@@ -1,49 +1,51 @@
 from smbus2 import SMBus
 import time
 
-PN532_I2C_ADDR = 0x24
-
-# PN532 komutları
-PN532_COMMAND_SAMCONFIGURATION = 0x14
-PN532_COMMAND_INLISTPASSIVETARGET = 0x4A
+PN532_ADDR = 0x24
 
 def write_command(bus, cmd, params=[]):
     frame = [0x00, 0x00, 0xFF]
     length = len(params) + 2
-    frame.append(length)
-    frame.append(~length & 0xFF)
-    frame.append(0xD4)
-    frame.append(cmd)
-
-    for p in params:
-        frame.append(p)
+    frame += [length, (~length & 0xFF), 0xD4, cmd]
+    frame += params
 
     checksum = 0xD4 + cmd + sum(params)
-    frame.append(~checksum & 0xFF)
-    frame.append(0x00)
+    frame += [(~checksum & 0xFF), 0x00]
 
-    bus.write_i2c_block_data(PN532_I2C_ADDR, 0x00, frame)
+    bus.write_i2c_block_data(PN532_ADDR, 0x00, frame)
+
+def read_ack(bus):
     time.sleep(0.1)
+    ack = bus.read_i2c_block_data(PN532_ADDR, 0x00, 6)
+    return ack == [0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00]
 
-def read_data(bus, length):
-    return bus.read_i2c_block_data(PN532_I2C_ADDR, 0x00, length)
+def read_response(bus, length=32):
+    time.sleep(0.2)
+    return bus.read_i2c_block_data(PN532_ADDR, 0x00, length)
 
-def init_pn532(bus):
-    write_command(bus, PN532_COMMAND_SAMCONFIGURATION, [0x01, 0x14, 0x01])
-    time.sleep(0.1)
+def sam_config(bus):
+    write_command(bus, 0x14, [0x01, 0x14, 0x01])
+    read_ack(bus)
 
 def read_uid(bus):
-    write_command(bus, PN532_COMMAND_INLISTPASSIVETARGET, [0x01, 0x00])
-    time.sleep(0.2)
-
-    data = read_data(bus, 32)
-
-    if len(data) < 20:
+    write_command(bus, 0x4A, [0x01, 0x00])
+    if not read_ack(bus):
         return None
 
+    data = read_response(bus)
+
+    # DEBUG için:
+    print("RAW:", data)
+
+    # UID parse (daha doğru offset)
     try:
-        uid_length = data[19]
-        uid = data[20:20+uid_length]
+        if data[7] != 0xD5:
+            return None
+        if data[8] != 0x4B:
+            return None
+
+        uid_length = data[13]
+        uid = data[14:14+uid_length]
         return uid
     except:
         return None
@@ -51,15 +53,15 @@ def read_uid(bus):
 def main():
     bus = SMBus(1)
 
-    print("PN532 başlatılıyor...")
-    init_pn532(bus)
+    print("PN532 init...")
+    sam_config(bus)
 
     print("Kart okut...")
 
     while True:
         uid = read_uid(bus)
         if uid:
-            print("KART ID:", [hex(i) for i in uid])
+            print("KART ID:", [hex(x) for x in uid])
             time.sleep(1)
 
 if __name__ == "__main__":
