@@ -63,7 +63,7 @@ def read_uid():
     return None
 
 print("Başlatılıyor...")
-    init_pn532()
+init_pn532()
 
 print("Kartı okutun...")
 while True:
